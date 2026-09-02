@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Von Mises toggle — config designer</title>
+<style>
+  body { font-family: -apple-system, Helvetica, sans-serif; margin: 0;
+         background: #efeae0; color: #2c2a25; display: flex; height: 100vh; }
+  #panel { width: 330px; padding: 18px 20px; background: #e6dfd2;
+           overflow-y: auto; box-sizing: border-box; }
+  #panel h1 { font-size: 17px; margin: 0 0 14px; }
+  .ctl { margin-bottom: 12px; }
+  .ctl label { display: flex; justify-content: space-between;
+               font-size: 13px; margin-bottom: 3px; }
+  .ctl label b { font-weight: 600; }
+  .ctl input[type=range] { width: 100%; }
+  #readout { font-size: 13px; line-height: 1.7; background: #efeae0;
+             border-radius: 8px; padding: 10px 12px; margin-top: 14px; }
+  #cmdbox { margin-top: 14px; }
+  #cmd { font-family: Menlo, monospace; font-size: 11px; background: #2c2a25;
+         color: #e8e3d8; padding: 10px; border-radius: 8px;
+         word-break: break-all; line-height: 1.5; }
+  #copy { margin-top: 8px; padding: 6px 14px; font-size: 13px;
+          border: 1px solid #8a8070; background: #efeae0; border-radius: 6px;
+          cursor: pointer; }
+  #copy:active { background: #ddd5c4; }
+  #view { flex: 1; }
+  svg { width: 100%; height: 100%; display: block; }
+  .note { font-size: 11.5px; color: #6b6353; margin-top: 10px;
+          line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Toggle config designer</h1>
+  <div class="ctl"><label><b>b</b> — frame leg (sketch u)
+    <span id="v-b"></span></label>
+    <input type="range" id="b" min="0.5" max="1.5" step="0.005" value="0.8803"></div>
+  <div class="ctl"><label><b>R</b> — arm length (sketch u)
+    <span id="v-R"></span></label>
+    <input type="range" id="R" min="1.0" max="2.6" step="0.005" value="1.7178"></div>
+  <div class="ctl"><label><b>drive state 1 with</b></label>
+    <select id="drv" style="width:100%;padding:4px;">
+      <option value="gamma">pivot angle γ₁</option>
+      <option value="beta">span angle with horizon β</option>
+    </select></div>
+  <div class="ctl" id="row-g1"><label><b>γ₁</b> — state-1 angle (°)
+    <span id="v-g1"></span></label>
+    <input type="range" id="g1" min="60" max="135" step="0.5" value="104"></div>
+  <div class="ctl" id="row-beta" style="display:none">
+    <label><b>β</b> — span vs horizon (°)
+    <span id="v-beta"></span></label>
+    <input type="range" id="beta" min="-30" max="30" step="0.25" value="0"></div>
+  <div class="ctl"><label><input type="checkbox" id="match" checked
+    style="margin-right:6px">γ₂ matched (mirror of γ₁)<span></span></label></div>
+  <div class="ctl" id="row-g2" style="display:none">
+    <label><b>γ₂</b> — state-2 angle (°)
+    <span id="v-g2"></span></label>
+    <input type="range" id="g2" min="190" max="280" step="0.5" value="233"></div>
+  <div class="ctl"><label><b>φ</b> — anchor direction (°)
+    <span id="v-phi"></span></label>
+    <input type="range" id="phi" min="100" max="150" step="0.25" value="127.58"></div>
+  <div class="ctl"><label><b>scale</b> — mm / sketch unit
+    <span id="v-sc"></span></label>
+    <input type="range" id="sc" min="80" max="160" step="0.5" value="118.76"></div>
+  <div id="readout"></div>
+  <div id="cmdbox">
+    <div id="cmd"></div>
+    <button id="copy">Copy command</button>
+  </div>
+  <div class="note">γ₂ is a pose label — the real state-2 stop comes
+    from the plate corner and needs a collision re-sweep if geometry
+    changes. Cutouts are omitted here; the kit generates them.</div>
+</div>
+<div id="view"><svg id="cv" viewBox="0 0 1000 900"></svg></div>
+
+<script>
+const W = 7.532, SPINE = -105.208, TABL = 45.189, TY0 = 27.615, TY1 = 55.231;
+const HOLE_R = 1.65, MX0 = 6.19, MY0 = 5.47, MDX = 35, MDY = 15;
+const D = Math.PI / 180;
+const $ = id => document.getElementById(id);
+
+function arcPts(c, s, e, seg = 20) {
+  let a0 = Math.atan2(s[1]-c[1], s[0]-c[0]);
+  let a1 = Math.atan2(e[1]-c[1], e[0]-c[0]);
+  let sw = a1 - a0;
+  if (sw > 0) sw -= 2*Math.PI;              // clockwise outline
+  const r = Math.hypot(s[0]-c[0], s[1]-c[1]);
+  const out = [];
+  for (let i = 1; i <= seg; i++) {
+    const a = a0 + sw*i/seg;
+    out.push([c[0]+r*Math.cos(a), c[1]+r*Math.sin(a)]);
+  }
+  return out;
+}
+
+function outline(b_mm, phi) {
+  const u = [Math.cos(phi*D), Math.sin(phi*D)], n = [u[1], -u[0]];
+  const S = [b_mm*u[0], b_mm*u[1]];
+  const v1 = [SPINE+W, S[1]+W], v2 = [S[0], S[1]+W];
+  const v3 = [S[0]+W*n[0], S[1]+W*n[1]], v4 = [W*n[0], W*n[1]];
+  const v5 = [0, -W], v6 = [SPINE+W, -W], v7 = [SPINE, 0];
+  const v8 = [SPINE, TY0], v9 = [SPINE-TABL, TY0];
+  const v10 = [SPINE-TABL, TY1], v11 = [SPINE, TY1], v12 = [SPINE, S[1]];
+  let pts = [v1, v2, ...arcPts(S, v2, v3), v4, ...arcPts([0,0], v4, v5),
+             v6, ...arcPts([SPINE+W, 0], v6, v7), v8, v9, v10, v11, v12,
+             ...arcPts([SPINE+W, S[1]], v12, v1)];
+  return { pts, S };
+}
+
+function draw() {
+  const b = +$('b').value, R = +$('R').value;
+  const phi = +$('phi').value, sc = +$('sc').value;
+  const b_mm = b*sc, R_mm = R*sc;
+  const { pts, S } = outline(b_mm, phi);
+
+  let g1;
+  if ($('drv').value === 'beta') {
+    const beta = +$('beta').value;
+    const u = [Math.cos(beta*D), Math.sin(beta*D)];
+    const su = S[0]*u[0] + S[1]*u[1];
+    const disc = su*su - (S[0]*S[0]+S[1]*S[1]) + R_mm*R_mm;
+    const c = -su + Math.sqrt(Math.max(disc, 0));
+    const T = [S[0]+c*u[0], S[1]+c*u[1]];
+    g1 = ((phi - Math.atan2(T[1], T[0])/D) % 360 + 360) % 360;
+    $('v-beta').textContent = beta.toFixed(2) + '°';
+    $('g1').value = g1;
+  } else {
+    g1 = +$('g1').value;
+  }
+  const matched = $('match').checked;
+  let g2 = matched ? 360 - g1 : +$('g2').value;
+  if (matched) $('g2').value = g2;
+
+  $('v-b').textContent = b.toFixed(3);
+  $('v-R').textContent = R.toFixed(3);
+  $('v-g1').textContent = g1.toFixed(1) + '°';
+  $('v-g2').textContent = g2.toFixed(1) + '°';
+  $('v-phi').textContent = phi.toFixed(2) + '°';
+  $('v-sc').textContent = sc.toFixed(1);
+
+  const T1 = [R_mm*Math.cos((phi-g1)*D), R_mm*Math.sin((phi-g1)*D)];
+  const T2 = [R_mm*Math.cos((phi-g2)*D), R_mm*Math.sin((phi-g2)*D)];
+  const c1 = Math.hypot(T1[0]-S[0], T1[1]-S[1]);
+  const c2 = Math.hypot(T2[0]-S[0], T2[1]-S[1]);
+  const rod = R_mm - 11.55 + 2.5;
+  const gp = Math.min(g1, 360 - g1);
+  const angS = Math.acos(Math.min(1, Math.max(-1,
+      (b_mm*b_mm + c1*c1 - R_mm*R_mm) / (2*b_mm*c1)))) / D;
+  const angT = 180 - gp - angS;
+  const beta1 = Math.atan2(T1[1]-S[1], T1[0]-S[0]) / D;
+
+  const all = pts.concat([T1, T2, S, [0,0]]);
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const pad = 30;
+  const minx = Math.min(...xs)-pad, maxx = Math.max(...xs)+pad;
+  const miny = Math.min(...ys)-pad, maxy = Math.max(...ys)+pad;
+  const VW = 1000, VH = 900;
+  const s = Math.min(VW/(maxx-minx), VH/(maxy-miny));
+  const mx = p => (p[0]-minx)*s + (VW-(maxx-minx)*s)/2;
+  const my = p => VH - ((p[1]-miny)*s + (VH-(maxy-miny)*s)/2);
+  const pt = p => mx(p).toFixed(1) + ',' + my(p).toFixed(1);
+
+  const framePath = 'M' + pts.map(pt).join(' L') + ' Z';
+  const holes = [[0,0], S, [SPINE-MX0, TY0+MY0], [SPINE-MX0, TY0+MY0+MDY],
+                 [SPINE-MX0-MDX, TY0+MY0], [SPINE-MX0-MDX, TY0+MY0+MDY]];
+  let svg = `<path d="${framePath}" fill="#e6dfd2" stroke="#8a8070" stroke-width="2"/>`;
+  for (const h of holes)
+    svg += `<circle cx="${mx(h)}" cy="${my(h)}" r="${HOLE_R*s}" fill="#efeae0" stroke="#8a8070" stroke-width="1.5"/>`;
+
+  const states = [[g1, T1, c1, '#4d47a3', '', 'state 1'],
+                  [g2, T2, c2, '#b0436a', '9 7', 'state 2']];
+  for (const [g, T, c, col, dash, name] of states) {
+    svg += `<line x1="${mx(S)}" y1="${my(S)}" x2="${mx(T)}" y2="${my(T)}"
+            stroke="#1D9E75" stroke-width="1.5" stroke-dasharray="3 4" opacity="0.8"/>`;
+    svg += `<line x1="${mx([0,0])}" y1="${my([0,0])}" x2="${mx(T)}" y2="${my(T)}"
+            stroke="${col}" stroke-width="5" stroke-linecap="round"
+            ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
+    svg += `<circle cx="${mx(T)}" cy="${my(T)}" r="8" fill="${col}"/>`;
+    const arcR = (g === g2 ? 34 : 26);
+    let ap = '';
+    for (let i = 0; i <= 40; i++) {
+      const a = (phi - g + g*i/40)*D;
+      const p = [arcR*Math.cos(a), arcR*Math.sin(a)];
+      ap += (i ? ' L' : 'M') + pt(p);
+    }
+    svg += `<path d="${ap}" fill="none" stroke="${col}" stroke-width="1.3"/>`;
+    const nearRight = mx(T) > VW - 280;
+    const lx = mx(T) + (nearRight ? -14 : 14);
+    const anch = nearRight ? 'end' : 'start';
+    svg += `<text x="${lx}" y="${my(T)-10}" fill="${col}" font-size="15"
+            text-anchor="${anch}">${name}: γ=${g.toFixed(1)}°  span ${c.toFixed(1)}</text>`;
+  }
+  const cornerArc = (V, dirA, dirB, r, col) => {
+    let dA = Math.atan2(dirA[1]-V[1], dirA[0]-V[0]) / D;
+    let dB = Math.atan2(dirB[1]-V[1], dirB[0]-V[0]) / D;
+    let dl = ((dB - dA) % 360 + 540) % 360 - 180;
+    let path = '';
+    for (let i = 0; i <= 30; i++) {
+      const a = (dA + dl*i/30) * D;
+      path += (i ? ' L' : 'M') + pt([V[0]+r*Math.cos(a), V[1]+r*Math.sin(a)]);
+    }
+    const mid = (dA + dl/2) * D;
+    const L = [V[0]+(r+13)*Math.cos(mid), V[1]+(r+13)*Math.sin(mid)];
+    return { arc: `<path d="${path}" fill="none" stroke="${col}" stroke-width="1.1"/>`, L };
+  };
+  const aS = cornerArc(S, [0,0], T1, 16, '#555');
+  svg += aS.arc + `<text x="${mx(aS.L)}" y="${my(aS.L)+4}" font-size="13"
+      fill="#555" text-anchor="middle">${angS.toFixed(1)}°</text>`;
+  const aT = cornerArc(T1, S, [0,0], 22, '#4d47a3');
+  svg += aT.arc + `<text x="${mx(aT.L)}" y="${my(aT.L)+4}" font-size="13"
+      fill="#4d47a3" text-anchor="middle">${angT.toFixed(1)}°</text>`;
+  svg += `<circle cx="${mx([0,0])}" cy="${my([0,0])}" r="6" fill="#efeae0" stroke="#555" stroke-width="2"/>`;
+  svg += `<circle cx="${mx(S)}" cy="${my(S)}" r="5" fill="#efeae0" stroke="#555" stroke-width="2"/>`;
+  svg += `<text x="${mx([0,0])+10}" y="${my([0,0])+18}" font-size="14" fill="#444">P</text>`;
+  svg += `<text x="${mx(S)-10}" y="${my(S)-12}" font-size="14" fill="#444" text-anchor="end">S</text>`;
+  $('cv').innerHTML = svg;
+
+  $('readout').innerHTML =
+    `b = <b>${b_mm.toFixed(1)} mm</b> &nbsp; R = <b>${R_mm.toFixed(1)} mm</b><br>` +
+    `span₁ = <b>${c1.toFixed(1)} mm</b> &nbsp; span₂ = <b>${c2.toFixed(1)} mm</b><br>` +
+    `γ₁ = <b>${g1.toFixed(1)}°</b> &nbsp; ∠S = <b>${angS.toFixed(1)}°</b>` +
+    ` &nbsp; ∠T = <b>${angT.toFixed(1)}°</b><br>` +
+    `span vs horizon β = <b>${beta1.toFixed(1)}°</b><br>` +
+    `rod cut length = <b>${rod.toFixed(1)} mm</b>`;
+  $('cmd').textContent =
+    `~/Desktop/vonmises-cad/kit --b ${b} --R ${R}` +
+    ` --gamma1 ${(+g1).toFixed(2)}` +
+    (matched ? '' : ` --gamma2 ${g2}`) +
+    ` --phi ${phi} --scale ${sc}`;
+}
+
+['b','R','g1','g2','phi','sc','beta'].forEach(id => $(id).addEventListener('input', draw));
+$('drv').addEventListener('change', () => {
+  const beta = $('drv').value === 'beta';
+  $('row-g1').style.display = beta ? 'none' : '';
+  $('row-beta').style.display = beta ? '' : 'none';
+  draw();
+});
+$('match').addEventListener('change', () => {
+  $('row-g2').style.display = $('match').checked ? 'none' : '';
+  draw();
+});
+$('copy').addEventListener('click', () => {
+  navigator.clipboard.writeText($('cmd').textContent);
+  $('copy').textContent = 'Copied';
+  setTimeout(() => $('copy').textContent = 'Copy command', 1200);
+});
+draw();
+</script>
+</body>
+</html>
