@@ -141,11 +141,16 @@ def main():
     ap.add_argument("--tab-l", type=float, default=45.189,
                     help="mounting tab length past the spine (mm)")
     ap.add_argument("--tab-y0", type=float, default=27.615)
-    ap.add_argument("--tab-y1", type=float, default=55.231)
+    ap.add_argument("--tab-y1", type=float, default=66.555,
+                    help="tab top; raised from 55.231 so the widened "
+                         "mount pattern (dy=28) keeps a mount_y0 edge "
+                         "margin above the upper hole row")
     ap.add_argument("--hole-d", type=float, default=3.3,
                     help="all hole diameters (pivot, anchor, mounting)")
     ap.add_argument("--mount-dx", type=float, default=35.0)
-    ap.add_argument("--mount-dy", type=float, default=15.0)
+    ap.add_argument("--mount-dy", type=float, default=28.0,
+                    help="row spacing; holes straddle the central spar "
+                         "band (spars at Y=+-7, holders to ~+-10.5)")
     ap.add_argument("--mount-x0", type=float, default=6.19,
                     help="near mount column offset from the spine (mm)")
     ap.add_argument("--mount-y0", type=float, default=5.47,
